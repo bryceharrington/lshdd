@@ -1,0 +1,238 @@
+#!/usr/bin/python3
+
+import os
+import re
+from subprocess import (Popen, PIPE)
+
+# TODO: sudo lshw -C disk -short
+# TODO: lsblk is interesting
+# TODO: Controller
+# ls /dev/disk/by-uuid
+# blkid
+# sudo vol_id --uuid /dev/sdb2
+# /proc/diskstats
+# fdisk -l provides a wealth of info
+# smartctl -a /dev/sdb1 - reports if SMART support is available/enabled
+
+# TODO: Merge into xdiagnose/utils
+def execute(command):
+    process = Popen(command, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=False)
+    command_stderr = process.stderr.read()
+    command_stdout = process.stdout.read()
+    if len(command_stderr) > 0:
+        return command_stderr.decode('utf-8')
+    return command_stdout.decode('utf-8')
+
+
+class HardDrive(object):
+    def __init__(self):
+        self.ident = ''
+        self.dev = None
+        self.sn = None
+        self.target = None
+        self.target_id = None
+        self.target_path = None
+        self.model = None
+        self.pci_node = None
+        self.pci_device = None
+        self.device_path = None
+        self.device_name = None
+        self.size = None
+        self.uuid = None
+        self.array = None
+        self.used = ''
+        self.mount = ''
+        self.read_speed = 0
+
+    @property
+    def size_gb(self):
+        if not self.size:
+            return ''
+        return self.size[:-1].split("(")[1]
+
+
+def hosted_drives(target_path):
+    for target in os.listdir(target_path):
+        if target[:6] != 'target':
+            continue
+        target_id_path = os.path.join(target_path, target)
+        for target_id in os.listdir(target_id_path):
+            if ':' not in target_id:
+                continue
+            hdpath = os.path.join(target_id_path, target_id)
+            drive = HardDrive()
+            drive.target = target
+            drive.target_id = target_id
+            drive.model = execute(['cat', os.path.join(hdpath, 'model')]).strip()
+            drive.device_path = os.path.join(hdpath, 'block')
+            if os.path.exists(drive.device_path):
+                drive.device_name = os.listdir(drive.device_path)[0]
+                drive.dev = "/dev/%s" %(drive.device_name)
+                yield drive
+
+def get_drives(pci_path='/sys/devices/pci0000:00'):
+    for pci_node in os.listdir(pci_path):
+        if pci_node[0:2] != '00':
+            continue
+        host_path = os.path.join(pci_path, pci_node)
+        for pci_device in os.listdir(host_path):
+            pci_device_path = os.path.join(host_path, pci_device)
+            if pci_device[:4] == 'host':
+                for drive in hosted_drives(pci_device_path):
+                    drive.pci_node = pci_node
+                    drive.pci_device = pci_device
+                    yield drive
+            elif pci_device[:2] == '00':
+                for pci_child in os.listdir(pci_device_path):
+                    pci_child_path = os.path.join(pci_device_path, pci_child)
+                    if pci_child[:4] == 'host':
+                        for drive in hosted_drives(pci_child_path):
+                            drive.pci_node = pci_node
+                            drive.pci_device = pci_child
+                            yield drive
+
+
+if __name__ == "__main__":
+    from optparse import OptionParser
+
+    parser = OptionParser(usage = "lshdd [OPTIONS]")
+#    parser.add_option("-b", "--bus",
+#                      action="store_true",
+#                      dest="bus",
+#                      default=False,
+#                      help="Report bus layout tree")
+#    parser.add_option("-i", "--idents",
+#                      action="store_true",
+#                      dest="idents",
+#                      default=False,
+#                      help="Report identification numbers for device")
+#    parser.add_option("-p", "--partitions",
+#                      action="store_true",
+#                      dest="partitions",
+#                      default=False,
+#                      help="Report partition details organized by partition")
+#    parser.add_option("-r", "--raid",
+#                      action="store_true",
+#                      dest="raid",
+#                      default=False,
+#                      help="Report RAID device members sorted by device name")
+#    parser.add_option("-t", "--timings",
+#                      action="store_true",
+#                      dest="timings",
+#                      default=False,
+#                      help="Report performance timings")
+    (options, args) = parser.parse_args()
+
+    is_root = False
+    if os.getenv("USER") == "root":
+        is_root = True
+
+    # TODO: readfile()
+    arrays = {}
+    command = ['cat', '/proc/mdstat']
+    text = execute(command)
+    for line in text.split("\n"):
+        if line[:2] != 'md':
+            continue
+        words = line.split()
+        array = words[0]
+        for word in words:
+            if word[:2] != 'sd':
+                continue
+            drive = word.split('[')[0]
+            dev = "/dev/%s" %(drive)
+            arrays[dev] = array
+
+    # Get df info
+    df = {}
+    command = ['df', '-Tx', 'devtmpfs', '-x', 'tmpfs', '-x', 'nfs']
+    text = execute(command)
+    for line in text.split("\n"):
+        if line.startswith("Filesystem"):
+            continue
+        data = line.split()
+        if len(data)<7:
+            continue
+        df[data[0]] = {
+            'type':    data[1],
+            'size':    data[2],
+            'used':    data[3],
+            'free':    data[4],
+            'percent': data[5],
+            'mount':   data[6],
+            }
+
+    last_lines = []
+    if is_root:
+        print("%-12s %8s  %-9s %-6s %-25s %-18s %-18s %8s %-4s %s" %(
+            "Bus", "Target", "Device", "Array", "Model", "ID", "SN#", "Size", "Used", "MB/sec"))
+    else:
+        print("%-12s %8s  %-9s %-6s %-18s %-4s" %(
+            "Bus", "Target", "Device", "Array", "Model", "Used"))
+
+    for drive in get_drives():
+        # Get hdparm info
+        command = ['hdparm', '-I', drive.dev]
+        text = execute(command)
+        for line in text.split("\n"):
+            patterns = [
+                ('model', r'Model Number:'),  # /sys/block/sd*/device/model
+                ('sn',    r'Serial Number:'),
+                ('size',  r'device size with M \= 1000\*1000:'),
+                ('ident', r'Device Identifier:'),
+                ('uuid',  r'Unique ID\s*:'),
+                ]
+            for key, pattern in patterns:
+                if re.search(pattern, line):
+                    drive.__dict__[key] = line.split(':')[1].strip()
+        drive.array = arrays.get(drive.dev, None)
+        if drive.array is None:
+            # Try first partition
+            drive.array = arrays.get("%s1" %(drive.dev), '')
+
+        # Gather read performance data
+        if is_root:
+            command = ['hdparm', '-t', '--direct', drive.dev]
+            text = execute(command)
+            items = text.split()[-2:]
+            if len(items) == 2 and items[1] == "MB/sec":
+                drive.read_speed = float(items[0])
+
+        array_dev = "/dev/%s" %(drive.array)
+        if array_dev in df.keys():
+            drive.used = df[array_dev]['percent']
+            drive.mount = df[array_dev]['mount']
+        else:
+            partitions = []
+            total_used = 0
+            total_size = 0
+            for df_dev in df.keys():
+                if df_dev.startswith(drive.dev):
+                    partitions.append(df_dev)
+                    total_used += int(df[df_dev]['used'])
+                    total_size += int(df[df_dev]['size'])
+            if len(partitions) == 1:
+                drive.used = df[partitions[0]]['percent']
+                drive.mount = df[partitions[0]]['mount']
+            elif len(partitions) > 1:
+                drive.used = "%2.0d%%" %(100 * total_used / total_size)
+                drive.mount = 'multiple'
+
+
+        if is_root:
+            s = "%-12s %8s  %-9s %-6s %-25s %-18s %-18s %8s %-4s %.1f" %(
+                drive.pci_node, drive.target_id, drive.dev, drive.array,
+                drive.model, drive.ident, drive.sn, drive.size_gb, drive.used,
+                drive.read_speed)
+        else:
+            s = "%-12s %8s  %-9s %-6s %-18s %-4s" %(
+                drive.pci_node, drive.target_id, drive.dev, drive.array,
+                drive.model, drive.used)
+        if drive.dev.startswith("/dev/sr"):
+            last_lines.append(s)
+        else:
+            print(s)
+
+    for line in last_lines:
+        print(line)
+
