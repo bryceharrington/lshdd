@@ -4,17 +4,6 @@ import os
 import re
 from subprocess import (Popen, PIPE)
 
-# TODO: sudo lshw -C disk -short
-# TODO: lsblk is interesting
-# TODO: Controller
-# ls /dev/disk/by-uuid
-# blkid
-# sudo vol_id --uuid /dev/sdb2
-# /proc/diskstats
-# fdisk -l provides a wealth of info
-# smartctl -a /dev/sdb1 - reports if SMART support is available/enabled
-
-# TODO: Merge into xdiagnose/utils
 def execute(command):
     process = Popen(command, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=False)
     command_stderr = process.stderr.read()
@@ -96,38 +85,12 @@ if __name__ == "__main__":
     from optparse import OptionParser
 
     parser = OptionParser(usage = "lshdd [OPTIONS]")
-#    parser.add_option("-b", "--bus",
-#                      action="store_true",
-#                      dest="bus",
-#                      default=False,
-#                      help="Report bus layout tree")
-#    parser.add_option("-i", "--idents",
-#                      action="store_true",
-#                      dest="idents",
-#                      default=False,
-#                      help="Report identification numbers for device")
-#    parser.add_option("-p", "--partitions",
-#                      action="store_true",
-#                      dest="partitions",
-#                      default=False,
-#                      help="Report partition details organized by partition")
-#    parser.add_option("-r", "--raid",
-#                      action="store_true",
-#                      dest="raid",
-#                      default=False,
-#                      help="Report RAID device members sorted by device name")
-#    parser.add_option("-t", "--timings",
-#                      action="store_true",
-#                      dest="timings",
-#                      default=False,
-#                      help="Report performance timings")
     (options, args) = parser.parse_args()
 
     is_root = False
     if os.getenv("USER") == "root":
         is_root = True
 
-    # TODO: readfile()
     arrays = {}
     command = ['cat', '/proc/mdstat']
     text = execute(command)

@@ -1,4 +1,4 @@
 lshdd
 =====
 
-list hard drive details
+lists hard drive details

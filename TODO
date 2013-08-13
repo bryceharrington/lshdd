@@ -1,0 +1,38 @@
+* sudo lshw -C disk -short
+* lsblk is interesting
+* Controller
+* ls /dev/disk/by-uuid
+* blkid
+* sudo vol_id --uuid /dev/sdb2
+* /proc/diskstats
+* fdisk -l provides a wealth of info
+* smartctl -a /dev/sdb1 - reports if SMART support is available/enabled
+
+* Add these options:
+#    parser.add_option("-b", "--bus",
+#                      action="store_true",
+#                      dest="bus",
+#                      default=False,
+#                      help="Report bus layout tree")
+#    parser.add_option("-i", "--idents",
+#                      action="store_true",
+#                      dest="idents",
+#                      default=False,
+#                      help="Report identification numbers for device")
+#    parser.add_option("-p", "--partitions",
+#                      action="store_true",
+#                      dest="partitions",
+#                      default=False,
+#                      help="Report partition details organized by partition")
+#    parser.add_option("-r", "--raid",
+#                      action="store_true",
+#                      dest="raid",
+#                      default=False,
+#                      help="Report RAID device members sorted by device name")
+#    parser.add_option("-t", "--timings",
+#                      action="store_true",
+#                      dest="timings",
+#                      default=False,
+#                      help="Report performance timings")
+
+* Use a readfile() routine instead of just catting mdstat, etc.
